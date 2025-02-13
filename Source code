@@ -1,0 +1,255 @@
+import gradio as gr
+import pandas as pd
+import os
+import matplotlib.pyplot as plt
+
+# Excel File Path
+file_path = "food_orders.xlsx"
+
+# Sample Menu with Prices
+menu = {
+    "Pizza Palace": {
+        "Margherita Pizza": (250, "Pizza"),
+        "Pepperoni Pizza": (300, "Pizza"),
+        "Veggie Supreme": (280, "Pizza"),
+    },
+    "Burger Haven": {
+        "Cheese Burger": (150, "Burger"),
+        "Chicken Burger": (180, "Burger"),
+        "Veggie Burger": (130, "Burger"),
+    },
+    "Tandoori Delight": {
+        "Paneer Tikka": (220, "Indian"),
+        "Chicken Tandoori": (350, "Indian"),
+        "Dal Makhani": (180, "Indian"),
+    },
+    "Chinese Wok": {
+        "Fried Rice": (200, "Chinese"),
+        "Chow Mein": (190, "Chinese"),
+        "Manchurian": (210, "Chinese"),
+    },
+    "Sweet Tooth": {
+        "Chocolate Cake": (150, "Dessert"),
+        "Ice Cream Sundae": (120, "Dessert"),
+        "Gulab Jamun": (100, "Dessert"),
+    }
+}
+
+# Ensure Excel File Exists
+if not os.path.exists(file_path):
+    df = pd.DataFrame(columns=["Order ID", "Customer Name", "Phone", "Address", "Restaurant", "Items", "Total Bill", "Status"])
+    df.to_excel(file_path, index=False)
+
+# Function to Get Next Order ID
+def get_next_order_id():
+    if os.path.exists(file_path):
+        df = pd.read_excel(file_path)
+        if not df.empty and "Order ID" in df.columns:
+            return int(df["Order ID"].max()) + 1
+    return 1  # Start from 1 if no orders exist
+
+# Function to Place an Order
+def place_order(name, phone, address, restaurant, selected_items):
+    if not name or not phone or not address or not restaurant or not selected_items:
+        return "⚠️ Please fill all fields and select at least one item!"
+
+    selected_items = [item.split(" - ₹")[0] for item in selected_items]  # Strip prices
+    total_bill = sum(menu[restaurant][item][0] for item in selected_items)
+    order_id = get_next_order_id()  # Get unique Order ID
+
+    # Create a new order entry
+    new_order = pd.DataFrame([{
+        "Order ID": order_id,
+        "Customer Name": name,
+        "Phone": phone,
+        "Address": address,
+        "Restaurant": restaurant,
+        "Items": ", ".join(selected_items),
+        "Total Bill": total_bill,
+        "Status": "Pending"
+    }])
+
+    # Read existing data and append new order
+    df = pd.read_excel(file_path)
+    df = pd.concat([df, new_order], ignore_index=True)
+    df.to_excel(file_path, index=False)
+
+    return f"✅ Order Placed! 🆔 Order ID: {order_id}\n🛒 Items: {', '.join(selected_items)}\n📍 Address: {address}\n📞 Phone: {phone}\n💰 Total: ₹{total_bill}\n🚚 Status: Pending"
+
+# Function to Update Order Status
+def update_status(order_id, new_status):
+    df = pd.read_excel(file_path)
+    
+    if order_id in df["Order ID"].values:
+        df.loc[df["Order ID"] == order_id, "Status"] = new_status
+        df.to_excel(file_path, index=False)
+        return f"✅ Order {order_id} status updated to {new_status}."
+    
+    return "⚠️ Order ID not found!"
+
+# 🛒 Order Page
+def order_page():
+    with gr.Blocks() as order:
+        gr.Markdown("<h2>🛒 Place Your Order</h2>")
+        
+        name_input = gr.Textbox(label="👤 Name")
+        phone_input = gr.Textbox(label="📞 Phone")
+        address_input = gr.Textbox(label="📍 Address")
+        restaurant_dropdown = gr.Dropdown(label="🏬 Choose a Restaurant", choices=list(menu.keys()))
+        item_checklist = gr.CheckboxGroup(label="🍽️ Select Items", choices=[])
+        place_order_btn = gr.Button("🛍️ Place Order")
+        order_output = gr.Textbox(label="🛎️ Order Status", interactive=False)
+
+        # ✅ Show items with prices in the selection menu
+        def update_menu(restaurant):
+            if restaurant in menu:
+                item_choices = [f"{item} - ₹{menu[restaurant][item][0]}" for item in menu[restaurant]]
+                return gr.update(choices=item_choices)
+            return gr.update(choices=[])
+
+        restaurant_dropdown.change(update_menu, inputs=[restaurant_dropdown], outputs=[item_checklist])
+
+        place_order_btn.click(
+            place_order,
+            inputs=[name_input, phone_input, address_input, restaurant_dropdown, item_checklist],
+            outputs=order_output
+        )
+
+    return order
+
+# Function to Update Order Status
+def update_status(order_id, new_status):
+    df = pd.read_excel(file_path)
+    
+    if order_id in df["Order ID"].values:
+        df.loc[df["Order ID"] == order_id, "Status"] = new_status
+        df.to_excel(file_path, index=False)
+        return f"✅ Order {order_id} status updated to {new_status}."
+    
+    return "⚠️ Order ID not found!"
+
+# Function to Generate Sales Summary and Charts
+def generate_summary():
+    df = pd.read_excel(file_path)
+
+    if df.empty:
+        return "⚠️ No data available for visualization."
+
+    total_revenue = df["Total Bill"].sum()
+    most_ordered_item = df["Items"].str.split(", ").explode().value_counts().idxmax()
+    
+    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+    # Revenue per Restaurant
+    sales_per_restaurant = df.groupby("Restaurant")["Total Bill"].sum()
+    sales_per_restaurant.plot(kind="bar", ax=ax[0], color="skyblue")
+    ax[0].set_title("💰 Sales per Restaurant")
+    ax[0].set_ylabel("Revenue (₹)")
+
+    # Order Status Distribution
+    status_counts = df["Status"].value_counts()
+    status_counts.plot(kind="pie", ax=ax[1], autopct="%1.1f%%", colors=["green", "orange", "red"])
+    ax[1].set_title("🚚 Order Status Distribution")
+
+    plt.tight_layout()
+    plt.savefig("summary_chart.png")
+
+    summary_text = f"📊 **Summary:**\n- 💰 **Total Revenue:** ₹{total_revenue}\n- 🍽️ **Most Ordered Item:** {most_ordered_item}"
+    
+    return summary_text, "summary_chart.png"
+
+# 🏠 Home Page
+def home():
+    with gr.Blocks() as home_page:
+        gr.Markdown("<h1 style='text-align: center; color: #E44D26;'>🍕 Food Delivery System 🚀</h1>")
+        
+        gr.Image("C:\\Users\\ASUS\\OneDrive\\Pictures\\Know-how-online-food-delivery-business-work-for-restaurants.jpg", 
+                 label="🏠 Welcome", interactive=False, height=300)
+
+        # Footer with Inline Social Media Icons
+        gr.HTML("""
+            <div style='text-align:center; padding:10px; font-size:14px; color:gray;'>
+                🍕 Made by <strong>HENIL PATEL</strong> 🚀 <BR><BR>
+                <span style='display: inline-flex; gap: 15px; margin-left: 10px;'>
+
+                    <a href='https://www.instagram.com/your_instagram' target='_blank'>
+                        <img src='https://cdn-icons-png.flaticon.com/512/174/174855.png' width='25' height='25'>
+                    </a>
+
+                    <a href='https://www.linkedin.com/in/your_linkedin' target='_blank'>
+                        <img src='https://cdn-icons-png.flaticon.com/512/174/174857.png' width='25' height='25'>
+                    </a>
+
+                    <a href='https://twitter.com/your_twitter' target='_blank'>
+                        <img src='https://cdn-icons-png.flaticon.com/512/733/733579.png' width='25' height='25'>
+                    </a>
+                </span>
+            </div>
+        """)
+
+    return home_page
+
+# 🛒 Order Page
+def order_page():
+    with gr.Blocks() as order:
+        gr.Markdown("<h2>🛒 Place Your Order</h2>")
+        
+        name_input = gr.Textbox(label="👤 Name")
+        phone_input = gr.Textbox(label="📞 Phone")
+        address_input = gr.Textbox(label="📍 Address")
+        restaurant_dropdown = gr.Dropdown(label="🏬 Choose a Restaurant", choices=list(menu.keys()))
+        item_checklist = gr.CheckboxGroup(label="🍽️ Select Items", choices=[])
+        place_order_btn = gr.Button("🛍️ Place Order")
+        order_output = gr.Textbox(label="🛎️ Order Status", interactive=False)
+
+        # ✅ Show items with prices in the selection menu
+        def update_menu(restaurant):
+            if restaurant in menu:
+                item_choices = [f"{item} - ₹{menu[restaurant][item][0]}" for item in menu[restaurant]]
+                return gr.update(choices=item_choices)
+            return gr.update(choices=[])
+
+        restaurant_dropdown.change(update_menu, inputs=[restaurant_dropdown], outputs=[item_checklist])
+
+        place_order_btn.click(
+            place_order,
+            inputs=[name_input, phone_input, address_input, restaurant_dropdown, item_checklist],
+            outputs=order_output
+        )
+
+    return order
+
+# 🚚 Order Status Page
+def status_page():
+    with gr.Blocks() as status:
+        gr.Markdown("<h2>🚚 Update Order Status</h2>")
+        
+        order_id_input = gr.Number(label="📦 Order ID")
+        status_dropdown = gr.Dropdown(label="🚚 Update Status", choices=["Pending", "In Progress", "Delivered"])
+        update_btn = gr.Button("✅ Update Status")
+        status_output = gr.Textbox(label="📜 Status Update", interactive=False)
+
+        update_btn.click(update_status, inputs=[order_id_input, status_dropdown], outputs=status_output)
+    
+    return status
+
+# 📊 Summary & Revenue Page
+def summary_page():
+    with gr.Blocks() as summary:
+        gr.Markdown("<h2>📊 Summary & Revenue Charts</h2>")
+        summary_text = gr.Textbox(label="📜 Summary", interactive=False)
+        summary_chart = gr.Image(label="📊 Revenue & Order Status Chart", interactive=False)
+
+        generate_btn = gr.Button("📈 Generate Summary & Charts")
+        generate_btn.click(generate_summary, outputs=[summary_text, summary_chart])
+
+    return summary
+
+# 🌟 Combine All Pages (Now with Summary Page)
+app = gr.TabbedInterface(
+    [home(), order_page(), status_page(), summary_page()],
+    ["🏠 Home", "🛒 Place Order", "🚚 Order Status", "📊 Summary & Revenue"]
+)
+
+# 🚀 Launch Application
+app.launch()
